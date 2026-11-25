@@ -372,12 +372,27 @@ document.querySelector('#brief-form').addEventListener('submit',async e=>{e.prev
   let previous = 0;
   let clockTimer = 0;
   const started = performance.now();
+  const KICK_EVENTS = ['pointerdown', 'touchstart', 'keydown', 'wheel', 'scroll'];
+  let kickArmed = false;
 
   function observeFilm() {
     if (paused || !visible || document.hidden || screening.open) {
       film.pause();
     } else {
-      film.play().catch(updateControl);
+      film.muted = true;
+      film.play().catch(() => {
+        // Некоторые браузеры (особенно внутри фрейма Craftum) не дают видео стартовать само —
+        // тогда запускаем его при первом касании, прокрутке или нажатии клавиши.
+        updateControl();
+        if (kickArmed) return;
+        kickArmed = true;
+        const kick = () => {
+          kickArmed = false;
+          KICK_EVENTS.forEach(type => removeEventListener(type, kick));
+          if (!paused && visible && !document.hidden && !screening.open) film.play().catch(() => {});
+        };
+        KICK_EVENTS.forEach(type => addEventListener(type, kick, { passive: true }));
+      });
     }
     runClock();
   }
