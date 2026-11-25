@@ -1,15 +1,18 @@
 // stage-effects.js
 ;(() => {
-  // Дым на первом экране: маленький WebGL-холст, растянутый CSS.
+  // Дым на первом экране (WebGL). Холст маленький и растягивается CSS —
+  // туман мягкий, поэтому это незаметно, зато очень дёшево для видеокарты.
   // Рисуется не чаще 30 раз в секунду и только пока первый экран виден.
+  // Курсор (или медленно блуждающий «прожектор» на телефоне) подсвечивает дым
+  // и раздвигает его; при прокрутке дым поднимается и заполняет экран.
   const stage = document.querySelector('.hero-sticky');
   const hero = stage.closest('.hero-scroll');
   const smoke = stage.querySelector('.stage-smoke');
-  const splice = stage.querySelector('.lens-splice');
   const screening = document.querySelector('#screening');
   const motion = matchMedia('(prefers-reduced-motion: reduce)');
-  const phone = matchMedia('(max-width: 700px) and (orientation: portrait)');
-  const shallowVertex = `
+  const finePointer = matchMedia('(hover: hover) and (pointer: fine)');
+
+  const vertex = `
     attribute vec2 position;
     varying mediump vec2 uv;
     void main() {
@@ -17,49 +20,61 @@
       gl_Position = vec4(position, 0.0, 1.0);
     }`;
 
-  const smokeFragment = `
+  const fragment = `
     precision mediump float;
     uniform float clock;
     uniform float swell;
     uniform float ratio;
+    uniform vec2 pointer;
+    uniform float hover;
     varying mediump vec2 uv;
 
     float hash(vec2 p) {
-      p = mod(p, 251.0);
-      return fract(sin(dot(p, vec2(17.41, 181.71))) * 10497.17);
+      p = mod(p, 289.0);
+      return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453);
     }
     float noise(vec2 p) {
       vec2 i = floor(p), f = fract(p);
-      f = f*f*(3.0-2.0*f);
-      return mix(mix(hash(i),hash(i+vec2(1.,0.)),f.x),
-        mix(hash(i+vec2(0.,1.)),hash(i+vec2(1.,1.)),f.x),f.y);
+      f = f * f * (3.0 - 2.0 * f);
+      return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), f.x),
+                 mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), f.x), f.y);
     }
-    float smoke(vec2 p) {
-      return noise(p)*0.53 + noise(p*2.07+8.0)*0.26 +
-        noise(p*4.29-4.0)*0.14 + noise(p*8.57+13.0)*0.07;
+    float fbm(vec2 p) {
+      float v = 0.0, a = 0.5;
+      for (int i = 0; i < 4; i++) { v += a * noise(p); p = p * 2.03 + 17.1; a *= 0.5; }
+      return v;
     }
 
     void main() {
-      float t = mod(clock, 800.0);
-      vec2 p = vec2(uv.x * max(1.0, ratio), uv.y);
-      vec2 flow = vec2(smoke(p*2.2 + vec2(-t*.105,t*.025)),
-        smoke(p*2.7 + vec2(t*.036,-t*.089))) - .52;
-      float layer = smoke(p*vec2(3.5,6.3) + flow*3.2 + vec2(-t*.33,-t*.18));
-      float swellHeight = .20 + swell*.38 + flow.x*.22;
-      float floorFog = 1.0 - smoothstep(.018,swellHeight,uv.y);
-      float arc = exp(-7.5*abs(uv.y - (.30 + flow.y*.50 + swell*.20)));
-      float fog = smoothstep(.30,.72,layer) * floorFog * .51;
-      fog += arc * smoothstep(.42,.79,layer) * swell * .60;
-      fog *= smoothstep(0.0,.035,uv.y);
-      // The warm beam lights the density field from the right edge.
-      float lit = smoothstep(.29,.77,uv.x + flow.x*.7);
-      float beamY = 0.20 + (1.0 - uv.x) * .58 + flow.y * .13;
-      float beam = exp(-8.5 * abs(uv.y - beamY)) * smoothstep(.40, .88, uv.x);
-      float amber = clamp(beam * (.25 + swell * 1.6), 0.0, 1.0);
-      fog += beam * swell * smoothstep(.50,.75,layer) * .37;
-      vec3 color = mix(vec3(.43,.44,.68), vec3(.84,.69,.54),lit);
-      color = mix(color, vec3(1.0,.54,.26), amber);
-      float alpha = clamp(fog, 0.0, .72);
+      float t = mod(clock, 600.0);
+      vec2 p = vec2(uv.x * ratio, uv.y);
+      vec2 cursor = vec2(pointer.x * ratio, pointer.y);
+      vec2 d = p - cursor;
+      float r2 = dot(d, d);
+      // Курсор раздвигает дым
+      float push = hover * exp(-r2 * 10.0);
+      p += d * push * 0.9;
+
+      // Клубы поднимаются вверх, закручиваясь
+      vec2 q = vec2(fbm(p * 1.5 + vec2(0.0, -t * 0.11)),
+                    fbm(p * 1.5 + vec2(5.2, -t * 0.09)));
+      vec2 r = vec2(fbm(p * 2.2 + q * 2.4 + vec2(1.7 - t * 0.05, 9.2 - t * 0.15)),
+                    fbm(p * 2.2 + q * 2.4 + vec2(8.3 + t * 0.04, 2.8 - t * 0.13)));
+      float n = fbm(p * 1.9 + r * 1.7 + vec2(0.0, -t * 0.19));
+
+      // Плотнее у пола; с прокруткой дым поднимается и затягивает экран
+      float ceiling = 0.42 + swell * 0.85;
+      float floorFog = 1.0 - smoothstep(ceiling - 0.42, ceiling + 0.08, uv.y + (q.x - 0.5) * 0.3);
+      float density = smoothstep(0.38, 0.86, n) * floorFog;
+      density += smoothstep(0.5, 0.95, n) * swell * 0.7;
+      density *= 1.0 - push * 0.75;
+
+      // Свет: тёплый справа, холодный слева, плюс луч у курсора
+      float side = smoothstep(0.15, 0.95, uv.x + (r.x - 0.5) * 0.7);
+      vec3 color = mix(vec3(0.42, 0.40, 0.70), vec3(0.86, 0.66, 0.52), side);
+      float beam = hover * exp(-r2 * 3.2);
+      color = color * (0.55 + 0.7 * n) + vec3(1.0, 0.92, 0.82) * beam * 0.75;
+      float alpha = clamp(density * (0.7 + swell * 0.25) + beam * density * 0.35, 0.0, 0.88);
       gl_FragColor = vec4(color * alpha, alpha);
     }`;
 
@@ -68,11 +83,11 @@
     return t * t * (3 - 2 * t);
   };
 
-  function atmosphere() {
-    const gl = smoke.getContext('webgl', { alpha: true, premultipliedAlpha: true, antialias: false, powerPreference: 'low-power' });
+  function createSmoke() {
+    const gl = smoke.getContext('webgl', { alpha: true, premultipliedAlpha: true, antialias: false, depth: false, powerPreference: 'low-power' });
     if (!gl) throw new Error('WebGL unavailable');
     const program = gl.createProgram();
-    [[gl.VERTEX_SHADER, shallowVertex], [gl.FRAGMENT_SHADER, smokeFragment]].forEach(([kind, code]) => {
+    [[gl.VERTEX_SHADER, vertex], [gl.FRAGMENT_SHADER, fragment]].forEach(([kind, code]) => {
       const shader = gl.createShader(kind);
       gl.shaderSource(shader, code);
       gl.compileShader(shader);
@@ -89,25 +104,25 @@
     gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
     gl.enableVertexAttribArray(position);
     gl.vertexAttribPointer(position, 2, gl.FLOAT, false, 0, 0);
-    const clock = gl.getUniformLocation(program, 'clock');
-    const swell = gl.getUniformLocation(program, 'swell');
-    const ratio = gl.getUniformLocation(program, 'ratio');
+    const u = name => gl.getUniformLocation(program, name);
+    const uniforms = { clock: u('clock'), swell: u('swell'), ratio: u('ratio'), pointer: u('pointer'), hover: u('hover') };
     return {
       resize() {
-        // Туман мягкий, поэтому хватает небольшого холста.
-        const width = Math.min(420, Math.max(200, Math.round(stage.clientWidth * 0.3)));
-        const aspect = stage.clientWidth / Math.max(1, stage.clientHeight);
-        const height = Math.min(320, Math.round(width / Math.max(0.55, aspect)));
+        const w = stage.clientWidth, h = Math.max(1, stage.clientHeight);
+        const scale = w < 700 ? 0.42 : 0.3;
+        const width = Math.round(Math.min(440, Math.max(150, w * scale)));
+        const height = Math.round(Math.min(360, Math.max(120, h * scale)));
         if (smoke.width !== width || smoke.height !== height) { smoke.width = width; smoke.height = height; }
         gl.viewport(0, 0, width, height);
-        gl.uniform1f(ratio, aspect);
+        gl.uniform1f(uniforms.ratio, w / h);
       },
-      draw(time, intensity) {
+      draw(time, swell, px, py, hover) {
         if (gl.isContextLost()) return;
-        gl.uniform1f(clock, time);
-        gl.uniform1f(swell, intensity);
+        gl.uniform1f(uniforms.clock, time);
+        gl.uniform1f(uniforms.swell, swell);
+        gl.uniform2f(uniforms.pointer, px, py);
+        gl.uniform1f(uniforms.hover, hover);
         gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
-        stage.classList.add('has-live-fog');
       }
     };
   }
@@ -118,7 +133,9 @@
   let clock = 0;
   let previous = 0;
   let frame = 0;
-  let cutLatched = false;
+  // Положение «прожектора» в координатах холста (0..1, y снизу вверх)
+  let px = 0.62, py = 0.35, tx = 0.62, ty = 0.35, hover = 0.35, targetHover = 0.35;
+  let lastPointer = 0;
   const paused = () => motion.matches || stage.classList.contains('is-paused') || screening.open;
 
   function wake() {
@@ -130,42 +147,48 @@
     if (!fog || !visible || document.hidden) return;
     const still = paused();
     if (still || !previous || now - previous >= 33) {
-      if (!still && previous) clock += Math.min(66, now - previous) / 1000;
+      const dt = previous ? Math.min(66, now - previous) / 1000 : 0;
       previous = still ? 0 : now;
+      if (!still) clock += dt;
+      // Без мыши (или на телефоне) свет медленно блуждает сам
+      if (!finePointer.matches || now - lastPointer > 2500) {
+        tx = 0.5 + 0.32 * Math.sin(clock * 0.21);
+        ty = 0.34 + 0.16 * Math.sin(clock * 0.33 + 1.3);
+        targetHover = 0.4;
+      }
+      const ease = 1 - Math.exp(-dt * 6);
+      px += (tx - px) * ease;
+      py += (ty - py) * ease;
+      hover += (targetHover - hover) * ease;
       const shown = still ? 0 : progress;
-      fog.draw(still ? 0 : clock, smooth(.29, .58, shown) * (1 - smooth(.72, 1, shown)));
+      fog.draw(clock, smooth(0.08, 0.7, shown), px, py, hover);
     }
     if (!still) wake();
   }
 
-  stage.addEventListener('blur:frame', ({ detail }) => {
-    progress = detail;
-    if (detail < .68) cutLatched = false;
-    if (detail > .87 && !cutLatched && !paused()) {
-      splice.animate([
-        { opacity: 0, transform: 'translateX(-4%)' },
-        { opacity: .44, transform: 'translateX(2%)', offset: .24 },
-        { opacity: .24, transform: 'translateX(-1%)', offset: .55 },
-        { opacity: 0 },
-      ], { duration: 330, easing: 'steps(5,end)' });
-      cutLatched = true;
-    }
+  stage.addEventListener('pointermove', event => {
+    if (event.pointerType !== 'mouse') return;
+    const box = stage.getBoundingClientRect();
+    tx = (event.clientX - box.left) / box.width;
+    ty = 1 - (event.clientY - box.top) / box.height;
+    targetHover = 1;
+    lastPointer = performance.now();
     wake();
-  });
+  }, { passive: true });
+  stage.addEventListener('pointerleave', () => { lastPointer = 0; });
+  stage.addEventListener('blur:frame', ({ detail }) => { progress = detail; wake(); });
 
-  smoke.addEventListener('webglcontextlost', () => { fog = null; stage.classList.remove('has-live-fog'); });
+  smoke.addEventListener('webglcontextlost', () => { fog = null; smoke.hidden = true; });
   document.addEventListener('visibilitychange', () => { previous = 0; wake(); });
   document.addEventListener('screeningchange', wake);
   motion.addEventListener('change', wake);
   new IntersectionObserver(([entry]) => { visible = entry.isIntersecting; previous = 0; wake(); }).observe(hero);
 
-  // На телефоне туман почти прозрачный (opacity .32), а стоит дорого — там его заменяет CSS-подсветка.
-  if (!phone.matches) {
-    try { fog = atmosphere(); } catch { fog = null; }
-  }
+  try { fog = createSmoke(); } catch { fog = null; }
   if (fog) {
     new ResizeObserver(() => { fog?.resize(); wake(); }).observe(stage);
     fog.resize();
+    wake();
   } else {
     smoke.hidden = true;
   }
@@ -218,7 +241,6 @@
       } else if (element.hasAttribute('data-live-cut')) {
         element.classList.add('cut-in');
       }
-      if (element.matches('.cast-card, .film')) element.classList.add('cut-reveal');
       observer.unobserve(element);
     }
   }, { threshold: 0.14 });
@@ -229,6 +251,45 @@
     }
     chapterEntrance.observe(element);
   });
+
+  if (motionOff.matches) return;
+
+  const framesByHost = new Map();
+  // Кадры раскрываются «шторкой» снизу, картинка внутри плавно отъезжает.
+  // Заголовки разделов проявляются из размытия — как наводка на резкость.
+  const reveal = new IntersectionObserver((entries, observer) => {
+    for (const entry of entries) {
+      if (!entry.isIntersecting) continue;
+      const el = entry.target;
+      observer.unobserve(el);
+      if (el.classList.contains('fi')) { el.classList.add('fi-in'); continue; }
+      // Следим за карточкой вокруг кадра: полностью закрытый шторкой кадр браузер «не видит».
+      const frame = framesByHost.get(el);
+      if (!frame) continue;
+      frame.classList.add('mr-in');
+      const delay = parseFloat(frame.style.getPropertyValue('--mr-delay')) || 0;
+      setTimeout(() => frame.classList.remove('mr', 'mr-in'), 1900 + delay);
+    }
+  }, { threshold: 0.12, rootMargin: '0px 0px -6% 0px' });
+
+  document.querySelectorAll('.film-image, .work-frame, .cast-photo, .portrait > img:first-child, .photo-grid .project-media')
+    .forEach((el, i) => {
+      const host = el.parentElement;
+      if (framesByHost.has(host)) return;
+      framesByHost.set(host, el);
+      el.classList.add('mr');
+      el.style.setProperty('--mr-delay', `${(i % 3) * 90}ms`);
+      reveal.observe(host);
+    });
+  document.querySelectorAll('main section:not(#home) h2').forEach(h => {
+    if (h.closest('[data-wedding-reveal]')) return;
+    h.classList.add('fi');
+    reveal.observe(h);
+  });
+
+  // Бегущая строка останавливается, когда её не видно.
+  const marquee = document.querySelector('.works-marquee');
+  if (marquee) new IntersectionObserver(([e]) => marquee.classList.toggle('is-off', !e.isIntersecting)).observe(marquee);
 })();
 
 // archive.js
@@ -248,6 +309,19 @@
   modal.querySelector('button').addEventListener('click', () => modal.close());
   modal.addEventListener('click', event => { if (event.target !== modal) return; const r=modal.getBoundingClientRect(); if (event.clientX<r.left || event.clientX>r.right || event.clientY<r.top || event.clientY>r.bottom) modal.close(); });
   modal.addEventListener('close', () => { player.pause(); player.removeAttribute('src'); player.load(); document.body.style.overflow = ''; origin?.focus({preventScroll:true}); document.dispatchEvent(new Event('screeningchange')); });
+
+  // Превью при наведении: ролик подгружается только когда на него навели мышь.
+  const canHover = matchMedia('(hover: hover) and (pointer: fine)');
+  document.querySelectorAll('[data-preview]').forEach(video => {
+    const host = video.closest('a');
+    host.addEventListener('pointerenter', () => {
+      if (!canHover.matches) return;
+      if (!video.src) video.src = video.dataset.preview;
+      video.currentTime = 0;
+      video.play().then(() => host.classList.add('is-previewing')).catch(() => {});
+    });
+    host.addEventListener('pointerleave', () => { video.pause(); host.classList.remove('is-previewing'); });
+  });
 })();
 
 // script.js
@@ -271,28 +345,21 @@ document.querySelector('#brief-form').addEventListener('submit',async e=>{e.prev
 
 // hero-motion.js
 ;(() => {
+  // Первый экран: видео + текст по центру. При прокрутке текст уходит из фокуса,
+  // видео приближается, а раздел «Наши работы» наезжает сверху (см. hero.css).
   const hero = document.querySelector('#home');
   const stage = hero.querySelector('.hero-sticky');
   const film = hero.querySelector('#scene-film');
   const intro = hero.querySelector('.hero-intro');
-  const actor = hero.querySelector('.actor-cutout');
   const grade = hero.querySelector('.hero-grade');
+  const finder = hero.querySelector('.hero-viewfinder');
+  const timecode = hero.querySelector('.vf-tc');
   const timeline = hero.querySelector('.hero-timeline span');
   const toggle = hero.querySelector('#motion-toggle');
   const screening = document.querySelector('#screening');
-  const optics = hero.querySelector('.hero-optics');
-  const ring = hero.querySelector('.lens-focus');
-  // Размеры фигуры меряем только при изменении окна, а не в каждом кадре:
-  // точка объектива совпадает с transform-origin и не смещается при зуме.
-  let box = { left: 0, top: 0, height: 0 };
-  function measure() {
-    box = { left: actor.offsetLeft, top: actor.offsetTop, height: actor.offsetHeight };
-  }
-  actor.addEventListener('load', () => { measure(); wake(); });
   const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
 
   const clamp = (value, min = 0, max = 1) => Math.max(min, Math.min(max, value));
-  const interpolate = (start, end, position) => start + (end - start) * position;
   const smooth = (position, start, end) => {
     const t = clamp((position - start) / (end - start));
     return t * t * (3 - 2 * t);
@@ -303,18 +370,16 @@ document.querySelector('#brief-form').addEventListener('submit',async e=>{e.prev
   let frame = 0;
   let progress = 0;
   let previous = 0;
+  let clockTimer = 0;
+  const started = performance.now();
 
   function observeFilm() {
     if (paused || !visible || document.hidden || screening.open) {
       film.pause();
-      return;
+    } else {
+      film.play().catch(updateControl);
     }
-    film.play().catch(() => {
-      // The browser can require a tap to start even a muted background.
-      if (!paused && visible && !document.hidden && !screening.open) {
-        updateControl();
-      }
-    });
+    runClock();
   }
 
   function updateControl() {
@@ -322,6 +387,18 @@ document.querySelector('#brief-form').addEventListener('submit',async e=>{e.prev
     toggle.innerHTML = play
       ? '<span aria-hidden="true">▶</span> Включить видео'
       : '<span aria-hidden="true">Ⅱ</span> Пауза';
+  }
+
+  // Тайм-код видоискателя: обновляется 12 раз в секунду, только пока экран виден.
+  const pad = n => String(Math.floor(n)).padStart(2, '0');
+  function tick() {
+    const s = (performance.now() - started) / 1000;
+    timecode.textContent = `${pad(s / 3600)}:${pad(s / 60 % 60)}:${pad(s % 60)}:${pad(s * 24 % 24)}`;
+  }
+  function runClock() {
+    const on = !paused && visible && !document.hidden;
+    if (on && !clockTimer) clockTimer = setInterval(tick, 84);
+    if (!on && clockTimer) { clearInterval(clockTimer); clockTimer = 0; }
   }
 
   function wake() {
@@ -335,54 +412,23 @@ document.querySelector('#brief-form').addEventListener('submit',async e=>{e.prev
 
     const elapsed = previous ? Math.min(now - previous, 40) : 16;
     previous = now;
-    const scrollDistance = Math.max(1, hero.offsetHeight - stage.offsetHeight);
-    const target = paused ? 0 : clamp(-hero.getBoundingClientRect().top / scrollDistance);
-    if (paused || Math.abs(target - progress) < 0.002) {
-      progress = target;
-    } else {
-      progress = interpolate(progress, target, 1 - Math.exp(-elapsed / 44));
-    }
+    const distance = Math.max(1, hero.offsetHeight - stage.offsetHeight);
+    const target = paused ? 0 : clamp(-hero.getBoundingClientRect().top / distance);
+    progress = Math.abs(target - progress) < 0.002
+      ? target
+      : progress + (target - progress) * (1 - Math.exp(-elapsed / 60));
 
-    const textOut = smooth(progress, 0.04, 0.32);
-    const push = smooth(progress, 0.42, 0.85);
-    const portrait = stage.clientWidth <= 700 && stage.clientHeight > stage.clientWidth;
-    intro.style.opacity = 1 - textOut;
-    intro.style.transform = `translateY(${-12 * textOut}px)`;
-    intro.inert = textOut >= 0.95;
-    grade.style.opacity = 1 - 0.83 * smooth(progress, 0.38, 0.89);
-    film.style.transform = `scale(${1 + 0.045 * push})`;
-    actor.style.setProperty('--hero-zoom', String(1 + Math.pow(Math.min(1, progress / 0.85), 1.7) * (portrait ? 2.7 : 3.9)));
-    actor.style.setProperty('--hero-shift', `${progress * (portrait ? -3 : 23)}vh`);
+    const out = smooth(progress, 0.02, 0.4);
+    intro.style.opacity = String(1 - out);
+    intro.style.filter = out > 0.002 ? `blur(${(out * 16).toFixed(2)}px)` : '';
+    intro.style.transform = out > 0.002 ? `translateY(${(-60 * out).toFixed(1)}px) scale(${(1 + 0.07 * out).toFixed(4)})` : '';
+    intro.inert = out > 0.95;
 
-    actor.style.setProperty('--hero-pan', `${portrait ? -14 * push : 0}vw`);
-
-    // Точка объектива: левый край блока + сдвиги, верх + 26,9% высоты.
-    const shiftPx = progress * (portrait ? -3 : 23) * innerHeight / 100;
-    const panPx = (portrait ? -14 * push : 0) * innerWidth / 100;
-    const focusX = box.left + panPx;
-    const focusY = box.top + box.height * .269 + shiftPx;
-
-    const ringIntensity = Math.max(0, 1 - Math.abs(progress - .43) / .13);
-    ring.style.setProperty('--focus-opacity', String(ringIntensity * .65));
-    if (ringIntensity) {
-      ring.style.left = `${focusX}px`;
-      ring.style.top = `${focusY}px`;
-      ring.style.setProperty('--focus-scale', String(1.2 - ringIntensity * .2));
-    }
-
-    if (portrait) {
-      const opening = smooth(progress, .50, .93);
-      optics.classList.toggle('iris-open', opening > 0);
-      optics.style.setProperty('--focus-x', `${focusX}px`);
-      optics.style.setProperty('--focus-y', `${focusY}px`);
-      optics.style.setProperty('--iris-radius', `${opening * Math.hypot(stage.clientWidth, stage.clientHeight) * 1.2}px`);
-      optics.style.setProperty('--iris-feather', '24px');
-    } else {
-      optics.classList.remove('iris-open');
-    }
-
-    timeline.style.transform = `scaleX(${progress})`;
-    stage.style.setProperty('--clear-stage', smooth(progress, 0.76, 1));
+    film.style.transform = `scale(${(1 + 0.16 * smooth(progress, 0, 1)).toFixed(4)})`;
+    grade.style.opacity = String(1 - 0.35 * smooth(progress, 0.25, 0.7));
+    finder.style.opacity = String(0.6 * (1 - out));
+    finder.style.transform = `scale(${(1 - 0.05 * out).toFixed(4)})`;
+    timeline.style.transform = `scaleX(${progress.toFixed(4)})`;
     stage.dispatchEvent(new CustomEvent('blur:frame', { detail: progress }));
 
     if (progress !== target) wake();
@@ -390,7 +436,6 @@ document.querySelector('#brief-form').addEventListener('submit',async e=>{e.prev
 
   function setPaused(value) {
     paused = value;
-    // Collapse only when motion is disabled; preserve viewport position below the intro.
     const before = hero.getBoundingClientRect();
     stage.classList.toggle('is-paused', paused);
     hero.classList.toggle('is-static', paused);
@@ -409,13 +454,9 @@ document.querySelector('#brief-form').addEventListener('submit',async e=>{e.prev
   film.addEventListener('pause', updateControl);
   reducedMotion.addEventListener('change', event => setPaused(event.matches));
   document.addEventListener('screeningchange', observeFilm);
-  document.addEventListener('visibilitychange', () => {
-    observeFilm();
-    previous = 0;
-    wake();
-  });
+  document.addEventListener('visibilitychange', () => { observeFilm(); previous = 0; wake(); });
   window.addEventListener('scroll', wake, { passive: true });
-  window.addEventListener('resize', () => { measure(); wake(); }, { passive: true });
+  window.addEventListener('resize', wake, { passive: true });
   new IntersectionObserver(([entry]) => {
     visible = entry.isIntersecting;
     observeFilm();
@@ -423,7 +464,7 @@ document.querySelector('#brief-form').addEventListener('submit',async e=>{e.prev
     wake();
   }).observe(hero);
 
-  measure();
+  tick();
   setPaused(paused);
 })();
 
