@@ -204,7 +204,7 @@
     requestAnimationFrame(() => intro.classList.add('cut-in'));
   }
 
-  for (const id of ['projects', 'pasha', 'artists', 'services', 'formats', 'weddings', 'voices', 'contact']) {
+  for (const id of ['projects', 'team', 'artists', 'services', 'formats', 'weddings', 'voices', 'contact']) {
     const section = document.getElementById(id);
     if (!section) continue;
     section.classList.add('has-signal');
@@ -272,7 +272,7 @@
     }
   }, { threshold: 0.12, rootMargin: '0px 0px -6% 0px' });
 
-  document.querySelectorAll('.film-image, .work-frame, .cast-photo, .portrait > img:first-child, .photo-grid .project-media')
+  document.querySelectorAll('.film-image, .work-frame, .cast-photo, .portrait > img:first-child, .bs-frame')
     .forEach((el, i) => {
       const host = el.parentElement;
       if (framesByHost.has(host)) return;
@@ -322,6 +322,42 @@
     });
     host.addEventListener('pointerleave', () => { video.pause(); host.classList.remove('is-previewing'); });
   });
+
+  // Бэкстейдж: короткие ролики играют без звука, пока видны на экране.
+  const loopWatch = new IntersectionObserver(entries => entries.forEach(({ target, isIntersecting }) => {
+    if (isIntersecting) {
+      if (!target.src) target.src = target.dataset.loop;
+      target.play().then(() => target.classList.add('is-on')).catch(() => {});
+    } else {
+      target.pause();
+    }
+  }), { threshold: 0.25 });
+  document.querySelectorAll('video[data-loop]').forEach(v => loopWatch.observe(v));
+
+  // Видеопривет-кружок: без звука крутится сам, по нажатию — со звуком и кольцом прогресса.
+  document.querySelectorAll('.voice-circle').forEach(circle => {
+    const video = circle.querySelector('video');
+    const ring = circle.querySelector('.voice-progress circle');
+    const length = 2 * Math.PI * 48;
+    ring.style.strokeDasharray = length;
+    ring.style.strokeDashoffset = length;
+    new IntersectionObserver(([e]) => {
+      if (e.isIntersecting) video.play().catch(() => {});
+      else { video.pause(); if (!video.muted) { video.muted = true; circle.classList.remove('is-loud'); circle.setAttribute('aria-pressed', 'false'); } }
+    }, { threshold: 0.4 }).observe(circle);
+    video.addEventListener('timeupdate', () => {
+      ring.style.strokeDashoffset = video.muted ? length : length * (1 - video.currentTime / (video.duration || 1));
+    });
+    circle.addEventListener('click', () => {
+      const loud = video.muted;
+      video.muted = !loud;
+      if (loud) video.currentTime = 0;
+      video.play().catch(() => {});
+      circle.classList.toggle('is-loud', loud);
+      circle.setAttribute('aria-pressed', String(loud));
+      circle.setAttribute('aria-label', loud ? 'Видеопривет: выключить звук' : 'Видеопривет: включить звук');
+    });
+  });
 })();
 
 // script.js
@@ -331,14 +367,14 @@ menu.addEventListener('click',()=>{const open=menu.getAttribute('aria-expanded')
 nav.querySelectorAll('a').forEach(a=>a.addEventListener('click',()=>{nav.classList.remove('open');menu.setAttribute('aria-expanded','false');}));
 const reveals=new IntersectionObserver(entries=>entries.forEach(e=>{if(e.isIntersecting){e.target.classList.add('visible');reveals.unobserve(e.target);}}),{threshold:.08});document.querySelectorAll('.reveal').forEach(e=>reveals.observe(e));
 const assets = {
-  'film-set': ['film-set', 'backstage-blue', 'camera-work'],
-  'live-stage': ['live-stage', 'live-desk'],
-  'live-screen': ['editorial/stage-feed', 'editorial/interview'],
+  backstage: ['backstage/set-veil','backstage/monitor-blue','backstage/stage-light','backstage/team-bw','backstage/set-blue',
+    'backstage/studio-interview','backstage/studio-hands','film-set','live-stage','editorial/stage-feed','backstage-blue',
+    'camera-work','live-desk','editorial/interview'],
   hockey: ['editorial/hockey-a', 'editorial/hockey-b'],
 };
 const gallery=document.querySelector('#gallery');let photos=[],index=0,opener;
-function showPhoto(){gallery.querySelector('img').src=`assets/${photos[index]}.jpg`;gallery.querySelector('img').alt=`Съёмочная площадка BLUR — фотография ${index+1}`;document.querySelector('#gallery-count').textContent=`${String(index+1).padStart(2,'0')} / ${String(photos.length).padStart(2,'0')}`;}
-document.querySelectorAll('[data-gallery]').forEach(b=>b.addEventListener('click',e=>{e.preventDefault();opener=b;photos=assets[b.dataset.gallery];index=0;showPhoto();gallery.showModal();document.body.style.overflow='hidden';}));
+function showPhoto(){gallery.querySelector('img').src=`assets/${photos[index]}.jpg`;gallery.querySelector('img').alt=`Бэкстейдж BLUR — фотография ${index+1}`;document.querySelector('#gallery-count').textContent=`${String(index+1).padStart(2,'0')} / ${String(photos.length).padStart(2,'0')}`;}
+document.querySelectorAll('[data-gallery]').forEach(b=>b.addEventListener('click',e=>{e.preventDefault();opener=b;photos=assets[b.dataset.gallery];index=+(b.dataset.index||0);showPhoto();gallery.showModal();document.body.style.overflow='hidden';}));
 function next(d){index=(index+d+photos.length)%photos.length;showPhoto();}gallery.querySelector('.gallery-next').addEventListener('click',()=>next(1));gallery.querySelector('.gallery-prev').addEventListener('click',()=>next(-1));gallery.querySelector('.gallery-close').addEventListener('click',()=>gallery.close());gallery.addEventListener('close',()=>{document.body.style.overflow='';opener?.focus();});gallery.addEventListener('click',e=>{if(e.target===gallery){const r=gallery.getBoundingClientRect();if(e.clientX<r.left||e.clientX>r.right||e.clientY<r.top||e.clientY>r.bottom)gallery.close();}});gallery.addEventListener('keydown',e=>{if(e.key==='ArrowRight')next(1);if(e.key==='ArrowLeft')next(-1);});
 document.querySelectorAll('[data-service]').forEach(a=>a.addEventListener('click',()=>{document.querySelector('textarea').value=a.dataset.service+'\n';}));
 document.querySelector('#brief-form').addEventListener('submit',async e=>{e.preventDefault();const data=new FormData(e.target);const text=`Заявка на съёмку BLUR\nИмя: ${data.get('name')}\nКонтакт: ${data.get('contact')}\nПроект: ${data.get('message')||'Обсудим детали'}`;const status=document.querySelector('#form-status');try{await navigator.clipboard.writeText(text);status.textContent='Текст заявки скопирован. Заявка ещё не отправлена.';}catch{const blob=new Blob([text],{type:'text/plain;charset=utf-8'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='BLUR-заявка.txt';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);status.textContent='Заявка сохранена в файл. Она ещё не отправлена.';}});
@@ -359,6 +395,7 @@ document.querySelector('#brief-form').addEventListener('submit',async e=>{e.prev
   const screening = document.querySelector('#screening');
   const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
 
+  const ICON = name => `<svg class="i i-${name}" aria-hidden="true" focusable="false"><use href="#i-${name}"/></svg>`;
   const clamp = (value, min = 0, max = 1) => Math.max(min, Math.min(max, value));
   const smooth = (position, start, end) => {
     const t = clamp((position - start) / (end - start));
@@ -400,8 +437,8 @@ document.querySelector('#brief-form').addEventListener('submit',async e=>{e.prev
   function updateControl() {
     const play = paused || film.paused;
     toggle.innerHTML = play
-      ? '<span aria-hidden="true">▶</span> Включить видео'
-      : '<span aria-hidden="true">Ⅱ</span> Пауза';
+      ? `${ICON('play')} Включить видео`
+      : `${ICON('pause')} Пауза`;
   }
 
   // Тайм-код видоискателя: обновляется 12 раз в секунду, только пока экран виден.
