@@ -376,7 +376,19 @@ function showPhoto(){gallery.querySelector('img').src=`assets/${photos[index]}.j
 document.querySelectorAll('[data-gallery]').forEach(b=>b.addEventListener('click',e=>{e.preventDefault();opener=b;photos=assets[b.dataset.gallery];index=+(b.dataset.index||0);showPhoto();gallery.showModal();document.body.style.overflow='hidden';}));
 function next(d){index=(index+d+photos.length)%photos.length;showPhoto();}gallery.querySelector('.gallery-next').addEventListener('click',()=>next(1));gallery.querySelector('.gallery-prev').addEventListener('click',()=>next(-1));gallery.querySelector('.gallery-close').addEventListener('click',()=>gallery.close());gallery.addEventListener('close',()=>{document.body.style.overflow='';opener?.focus();});gallery.addEventListener('click',e=>{if(e.target===gallery){const r=gallery.getBoundingClientRect();if(e.clientX<r.left||e.clientX>r.right||e.clientY<r.top||e.clientY>r.bottom)gallery.close();}});gallery.addEventListener('keydown',e=>{if(e.key==='ArrowRight')next(1);if(e.key==='ArrowLeft')next(-1);});
 document.querySelectorAll('[data-service]').forEach(a=>a.addEventListener('click',()=>{document.querySelector('textarea').value=a.dataset.service+'\n';}));
-document.querySelector('#brief-form').addEventListener('submit',async e=>{e.preventDefault();const data=new FormData(e.target);const text=`Заявка на съёмку BLUR\nИмя: ${data.get('name')}\nКонтакт: ${data.get('contact')}\nПроект: ${data.get('message')||'Обсудим детали'}`;const status=document.querySelector('#form-status');try{await navigator.clipboard.writeText(text);status.textContent='Текст заявки скопирован. Заявка ещё не отправлена.';}catch{const blob=new Blob([text],{type:'text/plain;charset=utf-8'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='BLUR-заявка.txt';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);status.textContent='Заявка сохранена в файл. Она ещё не отправлена.';}});
+// Заявка уходит в Telegram: открывается чат с @cheba_3, текст уже вписан — посетителю остаётся нажать «Отправить».
+const TELEGRAM='cheba_3';
+document.querySelector('#brief-form').addEventListener('submit',e=>{
+  e.preventDefault();
+  const data=new FormData(e.target);
+  const text=`Привет! Заявка с сайта BLUR\nИмя: ${data.get('name')}\nКонтакт: ${data.get('contact')}\nПроект: ${data.get('message')||'Обсудим детали'}`;
+  const url=`https://t.me/${TELEGRAM}?text=${encodeURIComponent(text)}`;
+  const status=document.querySelector('#form-status');
+  const win=window.open(url,'_blank');
+  if(win){ try{ win.opener=null; }catch{} } else { try{ window.top.location.href=url; }catch{ location.href=url; } }
+  navigator.clipboard?.writeText(text).catch(()=>{});
+  status.innerHTML=`Открываем Telegram… Если чат не открылся — <a href="${url}" target="_blank" rel="noopener">нажмите сюда</a>. Текст заявки также скопирован.`;
+});
 
 // hero-motion.js
 ;(() => {

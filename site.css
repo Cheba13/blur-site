@@ -1408,3 +1408,4 @@ a:hover .lens .ring, button:hover .lens .ring { transform: rotate(135deg); }
 }
 .live-grid .film-1 { grid-row: auto; }
 .voices-note { min-width: 230px; } .voices-grid { grid-template-columns: .8fr 1.2fr; }
+.form-note a, #form-status a { text-decoration: underline; text-underline-offset: 3px; }
