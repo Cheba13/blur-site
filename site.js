@@ -367,9 +367,8 @@ menu.addEventListener('click',()=>{const open=menu.getAttribute('aria-expanded')
 nav.querySelectorAll('a').forEach(a=>a.addEventListener('click',()=>{nav.classList.remove('open');menu.setAttribute('aria-expanded','false');}));
 const reveals=new IntersectionObserver(entries=>entries.forEach(e=>{if(e.isIntersecting){e.target.classList.add('visible');reveals.unobserve(e.target);}}),{threshold:.08});document.querySelectorAll('.reveal').forEach(e=>reveals.observe(e));
 const assets = {
-  backstage: ['backstage/set-veil','backstage/monitor-blue','backstage/stage-light','backstage/team-bw','backstage/set-blue',
-    'backstage/studio-interview','backstage/studio-hands','film-set','live-stage','editorial/stage-feed','backstage-blue',
-    'camera-work','live-desk','editorial/interview'],
+  backstage: ['backstage/concert-camera','backstage/set-veil','backstage/monitor-blue','backstage/stage-light','backstage/team-bw',
+    'backstage/set-blue','backstage/studio-interview','backstage/studio-hands','live-stage','editorial/stage-feed','backstage-blue'],
   hockey: ['editorial/hockey-a', 'editorial/hockey-b'],
 };
 const gallery=document.querySelector('#gallery');let photos=[],index=0,opener;
